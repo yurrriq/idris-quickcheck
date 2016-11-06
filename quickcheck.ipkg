@@ -1,0 +1,19 @@
+package quickcheck
+
+pkgs = effects
+     , tfrandom
+
+sourcedir = src
+
+modules = Test.QuickCheck
+        , Test.QuickCheck.Random
+
+brief = "A port of QuickCheck to Idris."
+-- version =
+readme = README.md
+-- license =
+author = "David Christiansen"
+
+homepage = https://github.com/david-christiansen/idris-quickcheck
+sourceloc = https://github.com/david-christiansen/idris-quickcheck
+bugtracker = https://github.com/david-christiansen/idris-quickcheck/issues

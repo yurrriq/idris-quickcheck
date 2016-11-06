@@ -1,4 +1,4 @@
-module QuickCheck
+module Test.QuickCheck
 
 import System
 import Debug.Trace
@@ -12,7 +12,7 @@ import System.Random.TF.Gen
 %default total
 
 doMsg : String -> IO ()
-doMsg message = do t <- mkForeign (FFun "time" [FPtr] FInt) prim__null
+doMsg message = do t <- foreign FFI_C "time" (Ptr -> IO Int) prim__null
                    putStrLn $ show t ++ "\t" ++ message
 
 repeatN : Nat -> a -> List a
@@ -25,13 +25,13 @@ repeatN n x = go n x []
 
 data Gen r a = MkGen (Int -> r -> a)
 
-instance Show (Gen r a) where
+implementation Show (Gen r a) where
   show _ = "<gen>"
 
-instance RandomGen r => Functor (Gen r) where
+implementation RandomGen r => Functor (Gen r) where
   map f (MkGen g) = MkGen $ \i, r => f (g i (snd (next r)))
 
-instance RandomGen r => Applicative (Gen r) where
+implementation RandomGen r => Applicative (Gen r) where
   pure x = MkGen (\i, r => x)
   (MkGen f) <$> (MkGen x) =
     MkGen $ \i, r =>
@@ -39,7 +39,7 @@ instance RandomGen r => Applicative (Gen r) where
             f i (snd (next r1)) (x i (snd (next r2)))
 
 
-instance RandomGen r => Monad (Gen r) where
+implementation RandomGen r => Monad (Gen r) where
   (MkGen m1) >>= k =
     MkGen $ \i, r => let (r1, r2) = split r in
                      let (MkGen m2) = k (m1 i (snd (next r1))) in
@@ -91,42 +91,42 @@ frequency xs = choose (1, sum (map fst xs)) >>= (assert_total $ flip pick xs)
 
 -- Arbitrary
 
-class RandomGen r => Arbitrary r a where
+interface RandomGen r => Arbitrary r a where
   arbitrary : Gen r a
   partial coarbitrary : a -> Gen r b -> Gen r b
 
-instance RandomGen r => Arbitrary r () where
+implementation RandomGen r => Arbitrary r () where
   arbitrary = pure ()
   coarbitrary () = variant 0
 
-instance RandomGen r => Arbitrary r Bool where
+implementation RandomGen r => Arbitrary r Bool where
   arbitrary = elements [True, False]
   coarbitrary True = variant 0
   coarbitrary False = variant 1
 
-instance RandomGen r => Arbitrary r Int where
+implementation RandomGen r => Arbitrary r Int where
   arbitrary = sized (\n => choose (-n,n))
   coarbitrary n = variant (cast $ if n >= 0 then 2*n else 2*(-n) + 1)
 
-instance RandomGen r => Arbitrary r Integer where
+implementation RandomGen r => Arbitrary r Integer where
   arbitrary = sized (\n => map {f=Gen r} cast $ choose (-n, n))
   coarbitrary n = variant (cast $ if n >= 0 then 2*n else 2*(-n) + 1)
 
-instance RandomGen r => Arbitrary r Float where
+implementation RandomGen r => Arbitrary r Double where
   arbitrary = sized (\n => do a <- choose (-n*1000000, n*1000000)
                               b <- choose (1, 1000000)
-                              return (prim__toFloatInt a / prim__toFloatInt b))
-  coarbitrary n = variant (cast $ prim__fromFloatInt (n * 10000.0))
+                              pure (prim__toDoubleInt a / prim__toDoubleInt b))
+  coarbitrary n = variant (cast $ prim__fromDoubleInt (n * 10000.0))
 
-instance RandomGen r => Arbitrary r Nat where
+implementation RandomGen r => Arbitrary r Nat where
   arbitrary = sized (\n => map {f=Gen r} cast $ choose (0,n))
   coarbitrary = variant
 
-instance (RandomGen r, Arbitrary r t1, Arbitrary r t2) => Arbitrary r (t1, t2) where
+implementation (RandomGen r, Arbitrary r t1, Arbitrary r t2) => Arbitrary r (t1, t2) where
   arbitrary = liftA2 (\n,m => (n, m)) arbitrary arbitrary
   coarbitrary (x, y) g = coarbitrary x (coarbitrary y g)
 
-instance (RandomGen r, Arbitrary r a) => Arbitrary r (List a) where
+implementation (RandomGen r, Arbitrary r a) => Arbitrary r (List a) where
   arbitrary = sized (\n => do i <- choose (0, n)
                               sequence (repeatN (cast i) arbitrary))
   coarbitrary [] = variant 0
@@ -134,15 +134,18 @@ instance (RandomGen r, Arbitrary r a) => Arbitrary r (List a) where
 
 
 --NB doesnt follow paper
-instance (RandomGen r, Arbitrary r t1, Arbitrary r t2) => Arbitrary r (t1 -> t2) where
+implementation (RandomGen r, Arbitrary r t1, Arbitrary r t2) => Arbitrary r (t1 -> t2) where
   arbitrary = promote (flip coarbitrary arbitrary)
   coarbitrary f gen = arbitrary  >>= ((flip coarbitrary gen) . f)
 
 -- Properties
-record Result : Type where
-  Res : (ok : Maybe Bool) ->  (stamp : List String) -> (arguments : List String) -> Result
+record Result where
+  constructor Res
+  ok : Maybe Bool
+  stamp : List String
+  arguments : List String
 
-instance Show Result where
+implementation Show Result where
   show (Res o s a) = "Result {" ++ show o ++ " " ++ show s ++ " " ++ show a ++ "}"
 
 data Property : Type -> Type where
@@ -154,13 +157,13 @@ nothing = Res Nothing [] []
 result : (RandomGen r) => Result -> Property r
 result = Prop . pure
 
-class RandomGen r => Testable r a where
+interface RandomGen r => Testable r a where
   partial property : a -> Property r
 
-instance RandomGen r => Testable r Bool where
+implementation RandomGen r => Testable r Bool where
   property b = result (record {ok = Just b} nothing)
 
-instance RandomGen r => Testable r (Property r) where
+implementation RandomGen r => Testable r (Property r) where
   property prop = prop
 
 evaluate : (RandomGen r, Testable r a) => a -> Gen r Result
@@ -170,11 +173,11 @@ evaluate {r=r} x = case property {r=r} x of
 forAll : (RandomGen r, Show a, Testable r b) => Gen r a -> (a -> b) -> Property r
 forAll gen body = Prop $ do a <- gen
                             res <- evaluate (body a)
-                            return (arg a res)
+                            pure (arg a res)
   where arg a res = record { arguments = show a :: arguments res } res
 
 
-instance (RandomGen r, Arbitrary r a, Show a, Testable r b) => Testable r (a -> b) where
+implementation (RandomGen r, Arbitrary r a, Show a, Testable r b) => Testable r (a -> b) where
   property f = forAll arbitrary f
 
 infix 4 |==>
@@ -198,12 +201,11 @@ collect v = label (show v)
 -- Running tests
 
 
-record Config : Type where
-  MkConfig : (maxTest : Int) ->
-             (maxFail : Int) ->
-             (size : Int -> Int) ->
-             (every : Int -> List String -> String) ->
-             Config
+record Config where
+  constructor MkConfig
+  maxTest, maxFail : Int
+  size : Int -> Int
+  every : Int -> List String -> String
 
 partial
 quick : Config
@@ -263,7 +265,7 @@ done mesg ntest stamps =
   entry (n, xs) = percentage n ntest ++ " " ++ concat (intersperse ", " xs)
 
 printTime : String -> IO ()
-printTime lbl = do t <- mkForeign (FFun "time" [FPtr] FInt) prim__null
+printTime lbl = do t <- foreign FFI_C "time" (Ptr -> IO Int) prim__null
                    putStrLn (lbl ++ " --- " ++ show t)
 
 
@@ -384,7 +386,7 @@ namespace Main
 
 
 -- Local Variables:
--- idris-packages: ("neweffects" "tfrandom")
+-- idris-packages: ("effects" "tfrandom")
 -- End:
 
 -- -}
